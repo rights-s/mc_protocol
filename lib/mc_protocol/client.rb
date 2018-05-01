@@ -8,8 +8,6 @@ module McProtocol
     WORD_DATA_LENGTH_LIMIT = 960
 
     def initialize(host, port, options={})
-      p "develop"
-      return
       @host   = host
       @port   = port
       @logger = Logger.new(STDOUT)
