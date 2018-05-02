@@ -22,7 +22,14 @@ Or install it yourself as:
 
 ## Usage
 
-TODO: Write usage instructions here
+Add configuration:
+
+    $ rails g mc_protocol:config
+
+MITSUBISHI PLC Communication
+
+    > plc = McProtocol::Client.new "192.168.1.1", 3000
+    > plc.get_bit "M0"
 
 ## Development
 
