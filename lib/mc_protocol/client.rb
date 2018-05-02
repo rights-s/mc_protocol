@@ -1,6 +1,9 @@
 require "socket"
+require "mc_protocol/config"
 
 module McProtocol
+  class ConnectionNotOpened < StandardError; end
+
   class Client
     attr_accessor :socket
 
@@ -17,17 +20,28 @@ module McProtocol
     end
 
     def open
-      # TODO: 接続確認
-      @socket ||= TCPSocket.open @host, @port
+      begin
+        @socket.close if opened?
+
+        Timeout.timeout(McProtocol.config.timeout) do
+          @socket = TCPSocket.open @host, @port
+        end
+      rescue => e
+        @logger.info "retry to open connection..."
+
+        retry_times = retry_times.blank? ? 1 : retry_times + 1
+        retry if retry_times <= 3
+
+        @logger.error e
+      end
     end
 
-    def open?
-      # TODO: もっとよい方法を
-      true if @socket.present?
+    def opened?
+      @socket.present? && !@socket.closed?
     end
 
     def close
-      @socket.close if open?
+      @socket.close if opened?
       @socket = nil
     end
 
@@ -36,9 +50,6 @@ module McProtocol
     end
 
     def get_bits(device_name, count)
-      # TODO: エラークラス化
-      raise "connection is not opened." if open?.blank?
-
       device = Device.new device_name
 
       response = []
@@ -47,12 +58,9 @@ module McProtocol
         messages = build_get_bits_message(device, res)
 
         @logger.info "READ: #{device.name}, #{res}"
-        @logger.debug "> #{dump messages}"
+        write messages
 
-        @socket.write messages.pack("c*")
-        @socket.flush
-
-        data = receive
+        data = read
 
         data.each_with_index do |d, i|
           response << (d & 16 > 0)
@@ -79,8 +87,6 @@ module McProtocol
     end
 
     def get_words(device_name, count)
-      raise "connection is not opened." if open?.blank?
-
       device = Device.new device_name
 
       response = []
@@ -89,12 +95,9 @@ module McProtocol
         messages = build_get_words_message(device, res)
 
         @logger.info "READ: #{device.name}, #{res}"
-        @logger.debug "> #{dump messages}"
+        write messages
 
-        @socket.write messages.pack("c*")
-        @socket.flush
-
-        data = receive
+        data = read
 
         data.each_slice(2) do |pair|
           response << pair.pack("c*").unpack("s<").first
@@ -117,8 +120,6 @@ module McProtocol
     end
 
     def set_words(device_name, values)
-      raise "connection is not opened." if open?.blank?
-
       device = Device.new device_name
 
       _values = values.dup
@@ -127,14 +128,11 @@ module McProtocol
         messages = build_set_words_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values}"
-        @logger.debug "> #{dump messages}"
 
-        # TODO: Cなのかcなのか確認
-        @socket.write messages.pack("c*")
-        @socket.flush
+        write messages
 
         # TODO: ここが怪しい
-        response = receive
+        response = read
 
         _values.shift res
         device.offset_device res
@@ -146,8 +144,6 @@ module McProtocol
     end
 
     def set_bits(device_name, values)
-      raise "connection is not opened." if open?.blank?
-
       device = Device.new device_name
 
       response = []
@@ -166,12 +162,10 @@ module McProtocol
         messages = build_set_bits_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
-        @logger.debug "> #{dump messages}"
 
-        @socket.write messages.pack("c*")
-        @socket.flush
+        write messages
 
-        _response = receive
+        _response = read
         response << _response
         # TODO: Writeの場合はレスポンスがない。
         # 終了コードを取得する方が良いか？
@@ -181,11 +175,23 @@ module McProtocol
       end
     end
 
-    def receive
+    private
+
+    def write(messages)
+      raise ConnectionNotOpened if opened?.blank?
+
+      @logger.debug "> #{dump messages}"
+
+      # TODO: Cなのかcなのか確認
+      @socket.write messages.pack("c*")
+      @socket.flush
+    end
+
+    def read
       res = []
       len = 0
       begin
-        Timeout.timeout(1.0) do
+        Timeout.timeout(McProtocol.config.timeout) do
           loop do
             c = @socket.read(1)
             next if c.nil? || c == ""
@@ -239,8 +245,6 @@ module McProtocol
       # @logger.debug("< #{dump_packet res}")
       results
     end
-
-    private
 
     def build_get_bits_message(device, count)
       # | サブヘッダ | アクセス経路             | データ長  | 監視タイマ| 要求データ                                   |
