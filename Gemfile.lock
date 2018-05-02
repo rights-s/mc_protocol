@@ -3,6 +3,7 @@ PATH
   specs:
     mc_protocol (0.1.0)
       activesupport
+      i18n
 
 GEM
   remote: https://rubygems.org/
