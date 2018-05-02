@@ -1,9 +1,8 @@
 require "socket"
 require "mc_protocol/config"
+require "mc_protocol/exceptions"
 
 module McProtocol
-  class ConnectionNotOpened < StandardError; end
-
   class Client
     attr_accessor :socket
 
@@ -81,10 +80,6 @@ module McProtocol
       @logger.debug "= #{response.join(' ')}"
 
       response
-
-    rescue => e
-      # TODO: 例外実装
-      @logger.error e
     end
 
     def get_word(device_name)
@@ -215,40 +210,22 @@ module McProtocol
       # "\xD0\x00\x00\xFF\xFF\x03\x00\x16\x00\x00\x00\v\x00\f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
       # 応答電文ヘッダチェック D000
-      if res[0] != 0xd0 || res[1] != 0x00
-        # 無効化レスポンス
-        return []
-      end
+      # TODO: 無効なレスポンスの場合、どうなるのか確認
+      return [] if res[0] != 0xd0 || res[1] != 0x00
 
       # 応答電文アクセス経路チェック
-      if res[2..6] != message_for_access_route
-        # 無効化レスポンス
-        return []
-      end
+      return [] if res[2..6] != message_for_access_route
 
       # 応答データ長
       length = res[7..8].pack("c*").unpack("v*").first
 
       # 終了コード(エラーコード)
       end_code = res[9..10].reverse.pack("c*").unpack("H*").first.upcase
-      if end_code != "0000"
-        # エラー
-        p "error #{end_code}"
-        return []
-      end
+      raise ProtocolError.new end_code if end_code != "0000"
 
       # データ
       data = res[11..-1]
       return data
-      p data
-
-      results = []
-      data.each_slice(2) do |pair|
-        results << pair.pack("c*").unpack("s<").first
-      end
-
-      # @logger.debug("< #{dump_packet res}")
-      results
     end
 
     def build_get_bits_message(device, count)
