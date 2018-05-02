@@ -11,8 +11,13 @@ module McProtocol
     WORD_DATA_LENGTH_LIMIT = 960
 
     def initialize(host, port, options={})
-      @host   = host
-      @port   = port
+      @host            = host
+      @port            = port
+      @network_no      = options[:network_no]      || 0x00
+      @pc_no           = options[:pc_no]           || 0xff
+      @unit_io_no      = options[:unit_io_no]      || [0xff, 0x03]
+      @unit_station_no = options[:unit_station_no] || 0x00
+
       @logger = Logger.new(STDOUT)
       @logger.level = options[:log_level] || :info
 
@@ -325,17 +330,12 @@ module McProtocol
       # | ネットワーク番号 | PC番号 | 要求先ユニットI/O番号 | 要求先ユニット局番号 |
       # | 0x00             | 0xff   | 0xff 0x03             | 0x00                 |
 
-      network_no      = 0x00          # ネットワーク番号      アクセス先のネットワークNo.を指定します。
-      pc_no           = 0xff          # PC番号                アクセス先のネットワークユニットの局番を指定します。
-      unit_io_no      = [0xff, 0x03]  # 要求先ユニットI/O番号 マルチドロップ接続局にアクセスする場合に，マルチドロップ接続元ユニットの先頭入 出力番号を指定します。
-                                      # マルチCPUシステム，二重化システムのCPUユニットを指定します。
-      unit_station_no = 0x00          # 要求先ユニット局番号  マルチドロップ接続局にアクセスする場合に，アクセス先ユニットの局番を指定します。
-
       numbers = []
-      numbers << network_no
-      numbers << pc_no
-      numbers << unit_io_no
-      numbers << unit_station_no
+      numbers << @network_no      # ネットワーク番号      アクセス先のネットワークNo.を指定します。
+      numbers << @pc_no           # PC番号                アクセス先のネットワークユニットの局番を指定します。
+      numbers << @unit_io_no      # 要求先ユニットI/O番号 マルチドロップ接続局にアクセスする場合に，マルチドロップ接続元ユニットの先頭入 出力番号を指定します。
+                                  #                       マルチCPUシステム，二重化システムのCPUユニットを指定します。
+      numbers << @unit_station_no # 要求先ユニット局番号  マルチドロップ接続局にアクセスする場合に，アクセス先ユニットの局番を指定します。
 
       numbers.flatten
     end
