@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = %q{NOTE: Write a short summary, because RubyGems requires one.}
   spec.description   = %q{NOTE: Write a longer description or delete this line.}
-  spec.homepage      = "NOTE: Put your gem's website or public repo URL here."
+  spec.homepage      = "https://www.rights-s.jp"
 
   # Prevent pushing this gem to RubyGems.org. To allow pushes either set the 'allowed_push_host'
   # to allow pushing to a single host or delete this section to allow pushing to any host.
