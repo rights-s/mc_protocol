@@ -6,8 +6,10 @@ module McProtocol
   class Client
     attr_accessor :socket
 
-    BIT_DATA_LENGTH_LIMIT = 7168
-    WORD_DATA_LENGTH_LIMIT = 960
+    BIT_DATA_LENGTH_LIMIT_3E = 7168
+    WORD_DATA_LENGTH_LIMIT_3E = 960
+    BIT_DATA_LENGTH_LIMIT_1E = 256
+    WORD_DATA_LENGTH_LIMIT_1E = 128
 
     def initialize(host, port, options={})
       @host            = host
@@ -16,6 +18,7 @@ module McProtocol
       @pc_no           = options[:pc_no]           || 0xff
       @unit_io_no      = options[:unit_io_no]      || [0xff, 0x03]
       @unit_station_no = options[:unit_station_no] || 0x00
+      @frame           = options[:frame]           || "3E"  # フレーム種類(3E, 1E)
 
       @logger = Logger.new(STDOUT)
       @logger.level = options[:log_level] || :info
@@ -58,23 +61,44 @@ module McProtocol
 
       response = []
 
-      repeat_set(device, count).each do |res|
-        messages = build_get_bits_message(device, res)
+      if @frame == "3E"
+        repeat_set(device, count).each do |res|
+          messages = build_get_bits_message(device, res)
 
-        @logger.info "READ: #{device.name}, #{res}"
-        write messages
+          @logger.info "READ: #{device.name}, #{res}"
+          write messages
 
-        data = read
+          data = read(res)
 
-        data.each_with_index do |d, i|
-          response << (d & 16 > 0)
+          data.each_with_index do |d, i|
+            response << (d & 16 > 0)
 
-          next if i == data.size - 1 && res.odd?
+            next if i == data.size - 1 && res.odd?
 
-          response << (d & 1 > 0)
+            response << (d & 1 > 0)
+          end
+
+          device.offset_device res
         end
+      elsif @frame == "1E"
+        repeat_set(device, count).each do |res|
+          messages = build_get_bits_message_1e(device, res)
 
-        device.offset_device res
+          @logger.info "READ: #{device.name}, #{res}"
+          write messages
+
+          data = read(res)
+
+          data.each_with_index do |d, i|
+            response << (d & 16 > 0)
+
+            next if i == data.size - 1 && res.odd?
+
+            response << (d & 1 > 0)
+          end
+
+          device.offset_device res
+        end
       end
 
       @logger.debug "= #{response.join(' ')}"
@@ -158,20 +182,38 @@ module McProtocol
         end
       end
 
-      repeat_set(device, values.size).each do |res|
-        messages = build_set_bits_message(device, _values[0, res])
+      if @frame == "3E"
+        repeat_set(device, values.size).each do |res|
+          messages = build_set_bits_message(device, _values[0, res])
 
-        @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
+          @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
 
-        write messages
+          write messages
 
-        _response = read
-        response << _response
-        # TODO: Writeの場合はレスポンスがない。
-        # 終了コードを取得する方が良いか？
+          _response = read(res)
+          response << _response
+          # TODO: Writeの場合はレスポンスがない。
+          # 終了コードを取得する方が良いか？
 
-        _values.shift res
-        device.offset_device res
+          _values.shift res
+          device.offset_device res
+        end
+      elsif @frame == "1E"
+        repeat_set(device, values.size).each do |res|
+          messages = build_set_bits_message_1e(device, _values[0, res])
+
+          @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
+
+          write messages
+
+          _response = read(0)
+          response << _response
+          # TODO: Writeの場合はレスポンスがない。
+          # 終了コードを取得する方が良いか？
+
+          _values.shift res
+          device.offset_device res
+        end
       end
     end
 
@@ -187,45 +229,116 @@ module McProtocol
       @socket.flush
     end
 
-    def read
+    def read(count)
       res = []
       len = 0
       begin
         Timeout.timeout(McProtocol.config.timeout) do
-          loop do
-            c = @socket.read(1)
-            next if c.nil? || c == ""
+          if @frame == "3E"
+            # 3E
+            loop do
+              c = @socket.read(1)
+              next if c.nil? || c == ""
 
-            res << c.bytes.first
-            len = res[7, 2].pack("c*").unpack("v*").first if res.length >= 9
-            break if (len + 9 == res.length)
+              res << c.bytes.first
+
+              # 応答データ長(8-9byte)を確認
+              len = res[7, 2].pack("c*").unpack("v*").first if res.length >= 9
+              break if (len + 9 == res.length)
+            end
+
+          elsif @frame == "1E"
+            # 1E
+            loop do
+              c = @socket.read(1)
+              next if c.nil? || c == ""
+
+              res << c.bytes.first
+
+              next if res.length < 2
+
+              # 終了コード
+              if res[1] == 0
+                # 正常終了 サブヘッダ+終了コード+応答データ数分のByte数を受信
+                break if res.size >= 2 + (count / 2.0).ceil
+
+              else
+                # 異常終了 サブヘッダ+終了コード+異常コード数分のByte数を受信
+                break if res.size >= 3
+
+              end
+            end
           end
         end
+
       rescue Timeout::Error
-        puts "*** ERROR: TIME OUT ***"
+        @logger.debug "< #{dump res}"
+        @logger.error "ERROR: Response time out."
       end
 
       @logger.debug "< #{dump res}"
-      # sample
-      # "\xD0\x00\x00\xFF\xFF\x03\x00\x16\x00\x00\x00\v\x00\f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-      # 応答電文ヘッダチェック D000
-      # TODO: 無効なレスポンスの場合、どうなるのか確認
-      return [] if res[0] != 0xd0 || res[1] != 0x00
+      if @frame == "3E"
+        # sample
+        # "\xD0\x00\x00\xFF\xFF\x03\x00\x16\x00\x00\x00\v\x00\f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-      # 応答電文アクセス経路チェック
-      return [] if res[2..6] != message_for_access_route
+        # 応答電文ヘッダチェック D000
+        # TODO: 無効なレスポンスの場合、どうなるのか確認
+        return [] if res[0] != 0xd0 || res[1] != 0x00
 
-      # 応答データ長
-      length = res[7..8].pack("c*").unpack("v*").first
+        # 応答電文アクセス経路チェック
+        return [] if res[2..6] != message_for_access_route
 
-      # 終了コード(エラーコード)
-      end_code = res[9..10].reverse.pack("c*").unpack("H*").first.upcase
-      raise ProtocolError.new end_code if end_code != "0000"
+        # 応答データ長
+        length = res[7..8].pack("c*").unpack("v*").first
 
-      # データ
-      data = res[11..-1]
-      return data
+        # 終了コード(エラーコード)
+        end_code = res[9..10].reverse.pack("c*").unpack("H*").first.upcase
+        raise ProtocolError.new end_code if end_code != "0000"
+
+        # データ
+        data = res[11..-1]
+        return data
+
+      elsif @frame == "1E"
+        # 終了コード(エラーコード)
+        if res[1] != 0x00
+          if res[1] == 0x5b
+            raise ProtocolError.new res[2]
+          else
+            raise "不明なエラー"
+          end
+        end
+
+        data = res[2..-1]
+        return data
+      end
+    end
+
+    def build_get_bits_message_1e(device, count)
+      # | サブヘッダ | PC番号 | ACPU監視タイマ | 要求データ                              |
+      # | 0x00       | 0xff   | 0x10 0x00      | 0xD2 0x04 0x00 0x00 0x20 0x44 0x05 0x00 |
+      #
+      # サブヘッダ 0x00 - ビット単位の一括読出
+      #            0x01 - ワード単位の一括読出
+      #            0x02 - ビット単位の一括書込
+      #            0x03 - ワード単位の一括書込
+      # PC番号     0xff - 自局
+      #            0x03 - 他局（局番）
+      # ACPU監視タイマ(3Eと同じ)
+
+      messages = []
+      messages.concat [0x00] # サブヘッダ
+      messages.concat [@pc_no] # PC番号
+      messages.concat message_for_monitoring_timer # ACPU監視タイマ
+      # messages.concat [0xD2, 0x04, 0x00, 0x00, 0x20, 0x44, 0x05, 0x00]
+      # messages.concat [0x64, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00]
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00] # とりあえずできてるっぽい。こちらの受信解釈でエラーになっているだけ
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00, 0x01, 0x11, 0x01, 0x00, 0x00, 0x01] # M50-M61へ書込
+      messages.concat message_for_get_bits_request_data_1e(device, count)
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00] # M50から12点読込
+
+      messages
     end
 
     def build_get_bits_message(device, count)
@@ -275,6 +388,23 @@ module McProtocol
       messages.concat message_for_request_data_length(m1, m2) # 要求データ長メッセージ
       messages.concat m1                                      # 監視タイマーメッセージ
       messages.concat m2                                      # 要求データメッセージ
+
+      messages
+    end
+
+    def build_set_bits_message_1e(device, data)
+      # TODO: フォーマット
+
+      messages = []
+      messages.concat [0x02] # サブヘッダ
+      messages.concat [@pc_no] # PC番号
+      messages.concat message_for_monitoring_timer # ACPU監視タイマ
+      # messages.concat [0xD2, 0x04, 0x00, 0x00, 0x20, 0x44, 0x05, 0x00]
+      # messages.concat [0x64, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00]
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00] # とりあえずできてるっぽい。こちらの受信解釈でエラーになっているだけ
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00, 0x01, 0x11, 0x01, 0x00, 0x00, 0x01] # M50-M61へ書込
+      messages.concat message_for_set_bits_request_data_1e(device, data)
+      # messages.concat [0x32, 0x00, 0x00, 0x00, 0x20, 0x4d, 0x0c, 0x00] # M50から12点読込
 
       messages
     end
@@ -344,6 +474,20 @@ module McProtocol
       messages
     end
 
+    def message_for_get_bits_request_data_1e(device, count)
+      # 要求データ
+      # | 先頭デバイス                         | デバイス点数 | 固定値 |
+      # | デバイス番号        | デバイスコード | デバイス点数 | 固定値 |
+      # | 50                  | M              | 12           | 0x00   |
+      # | 0xd2 0x04 0x00 0x00 | 0x20 0x4d      | 0x0c         | 0x00   |
+      messages = []
+      messages.concat message_for_request_data_device_name_1e(device)
+      messages.concat message_for_request_data_device_count_1e(count)
+      messages.concat [0]
+
+      messages
+    end
+
     def message_for_get_words_request_data(device, count)
       messages = [0x01, 0x04, 0x00, 0x00]
       messages.concat message_for_request_data_device_name(device)
@@ -356,6 +500,40 @@ module McProtocol
       messages = [0x01, 0x14, 0x01, 0x00]
       messages.concat message_for_request_data_device_name(device)
       messages.concat message_for_request_data_device_count(data.size)
+
+      _data = []
+      data.each_slice(2) do |pair|
+        _t = 0
+        if pair.first == true
+          _t = _t | 16
+        end
+
+        if pair.size == 1
+          _data << _t
+          next
+        end
+
+        if pair.last == true
+          _t = _t | 1
+        end
+
+        _data << _t
+      end
+
+      __data = _data.pack("c*").unpack("C*")
+
+      # messages.concat _data.pack("s*").unpack("C*")
+      messages.concat __data
+
+
+      messages
+    end
+
+    def message_for_set_bits_request_data_1e(device, data)
+      messages = []
+      messages.concat message_for_request_data_device_name_1e(device)
+      messages.concat message_for_request_data_device_count_1e(data.size)
+      messages.concat [0]
 
       _data = []
       data.each_slice(2) do |pair|
@@ -417,20 +595,61 @@ module McProtocol
       message
     end
 
+    def message_for_request_data_device_name_1e(device)
+      # | デバイス番号        | デバイスコード |
+      # | 0xd2 0x04 0x00 0x00 | 0xa8           |
+
+      # デバイス番号 4byte
+      # 内部リレー (M)1234の場合(デバイス番号が10進数のデバイスの場合)
+      # バイナリコード時は，デバイス番号を16進数に変換します。"1234"(10進) => "4D2"(16進)
+      # デバイス番号: 4バイトの数値を下位バイト(L: ビット0~7)から送信します
+
+      message = []
+
+      if device.decimal_device?
+        message.concat [device.number_int].pack("V").unpack("C*")
+
+      elsif device.hex_device?
+        message.concat [device.number.hex].pack("V").unpack("C*")
+
+      end
+      message.concat device.code_1e.unpack("C*").reverse
+
+      message
+    end
+
     def message_for_request_data_device_count(count)
       # | デバイス点数 |
       # | 0x02 0x00    | (10点)
       [count].pack("v").unpack("c*")
     end
 
+    def message_for_request_data_device_count_1e(count)
+      # | デバイス点数 |
+      # | 0x0c         | (10点)
+      if count.zero?
+        [0]
+      else
+        [count]
+      end
+    end
+
     # 1度の通信で取得できるlimitを元にくり返し取得数配列を作成
     def repeat_set(device, count)
       # TODO: refactor
       limit = 0
-      if device.bit_device?
-        limit = BIT_DATA_LENGTH_LIMIT
-      elsif device.word_device?
-        limit = WORD_DATA_LENGTH_LIMIT
+      if @frame == "3E"
+        if device.bit_device?
+          limit = BIT_DATA_LENGTH_LIMIT_3E
+        elsif device.word_device?
+          limit = WORD_DATA_LENGTH_LIMIT_3E
+        end
+      elsif @frame == "1E"
+        if device.bit_device?
+          limit = BIT_DATA_LENGTH_LIMIT_1E
+        elsif device.word_device?
+          limit = WORD_DATA_LENGTH_LIMIT_1E
+        end
       end
 
       counts = []

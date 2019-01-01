@@ -1,6 +1,6 @@
 module McProtocol
   class Device
-    attr_accessor :prefix, :number, :category, :numeration, :code
+    attr_accessor :prefix, :number, :category, :numeration, :code, :code_1e
 
     def initialize(device_name)
       @settings = settings
@@ -17,6 +17,7 @@ module McProtocol
       @category   = setting[:category]
       @numeration = setting[:numeration]
       @code       = setting[:code][:binary]
+      @code_1e    = setting[:code][:ascii_1e]
       @number     = _device_name[@prefix.size..-1]
 
       raise "[#{device_name}] is not support device name." if @prefix.blank? || @number.blank?
@@ -102,7 +103,8 @@ module McProtocol
           numeration: :decimal,
           code: {
             ascii: "M*",
-            binary: 0x90
+            binary: 0x90,
+            ascii_1e: "M "
           },
         },
         L: {
