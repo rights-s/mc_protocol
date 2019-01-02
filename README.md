@@ -1,42 +1,103 @@
 # McProtocol
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/mc_protocol`. To experiment with that code, run `bin/console` for an interactive prompt.
+三菱電機製品の通信プロトコルであるMCプロトコルTCP通信ライブラリです。
 
-TODO: Delete this and the text above, and describe your gem
+## サポートしているプロトコル
 
-## Installation
+MCプロトコルはフレームの異なる4つの通信方式があります。
+このライブラリで対応しているのは以下２つになります。
 
-Add this line to your application's Gemfile:
+* 3Eフレーム
+* 1Eフレーム
+
+## インストール方法
+
+Gemによるインストール
+
+    $ gem install rights-s/gem-mc_protocol
+
+Gemfileによるインストール
 
 ```ruby
 gem 'mc_protocol'
 ```
 
-And then execute:
-
     $ bundle
 
-Or install it yourself as:
+## 使い方
 
-    $ gem install mc_protocol
-
-## Usage
-
-Add configuration:
+コンフィグファイルの追加(Rails)
 
     $ rails g mc_protocol:config
 
-MITSUBISHI PLC Communication
+通信方法
 
-    > plc = McProtocol::Client.new "192.168.1.1", 3000
-    > plc.get_bit "M0"
+### 初期化
 
-## Development
+    > client = McProtocol::Frame1e::Client.new "192.168.1.160", 3000
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+### オプション
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+    > client = McProtocol::Frame1e::Client.new "192.168.1.160", 3000, log_level: :debug
+    
+* log_level ... ログレベル
+* pc_no ... PC番号
+* network_no ... ネットワークNo
+* unit_io_no ... ユニットNo
+* unit_station_no ... ステーションNo
 
-## Contributing
+### オープン
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/mc_protocol.
+    > client.open
+
+### 初期化 & オープン
+
+    > client = McProtocol::Frame1e::Client.open "192.168.1.160", 3000
+
+### ビット呼出
+
+M10を読込み
+
+    > client.get_bit "M10"
+
+M10から100点を読込み
+
+    > client.get_bits "M10", 100
+
+### ビット書込
+
+M10を書き込み
+
+    > client.set_bit "M10", true
+
+M10から4点を書き込み
+
+    > client.set_bits "M10", [1, 0, 1, 0]
+
+### ワード呼出
+
+D10を読込み
+
+    > client.get_word "D10"
+
+D10から100点を読込み
+
+    > client.get_words "D10", 100
+
+### ワード書込
+
+D10を書き込み
+
+    > client.set_word "D10", 1200
+
+D10から4点を書き込み
+
+    > client.set_words "D10", [1200, 0, 2400, -360]
+
+### ブロックの利用
+
+```ruby
+McProtocol::Frame1e::Client.open "192.168.1.160", 3000, do |client|
+  client.set_bit "M1", 1
+end
+```
