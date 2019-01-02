@@ -1,8 +1,8 @@
 require "mc_protocol/frame1e/device"
 
 module McProtocol::Frame1e
-  BIT_DATA_LENGTH_LIMIT = 256
-  WORD_DATA_LENGTH_LIMIT = 128
+  BIT_DATA_LENGTH_LIMIT = 128
+  WORD_DATA_LENGTH_LIMIT = 40
 
   class Client < McProtocol::Client
     def initialize(host, port, options={})
@@ -80,7 +80,7 @@ module McProtocol::Frame1e
         @logger.info "READ: #{device.name}, #{res}"
         write messages
 
-        data = read(res * 8)
+        data = read(res * 4)
 
         data.each_slice(2) do |pair|
           response << pair.pack("c*").unpack("s<").first
@@ -100,6 +100,23 @@ module McProtocol::Frame1e
     end
 
     def set_words(device_name, values)
+      device = Device.new device_name
+
+      _values = values.dup
+
+      repeat_set(device, values.size).each do |res|
+        messages = build_set_words_message(device, _values[0, res])
+
+        @logger.info "WRITE: #{device.name}, #{_values}"
+
+        write messages
+
+        # TODO: ここが怪しい
+        response = read(0)
+
+        _values.shift res
+        device.offset_device res
+      end
     end
 
     private
@@ -195,6 +212,18 @@ module McProtocol::Frame1e
       messages
     end
 
+    def build_set_words_message(device, data)
+      # TODO: フォーマット
+
+      messages = []
+      messages.concat [0x03] # サブヘッダ
+      messages.concat [@pc_no] # PC番号
+      messages.concat message_for_monitoring_timer # ACPU監視タイマ
+      messages.concat message_for_set_words_request_data(device, data)
+
+      messages
+    end
+
     def message_for_get_bits_request_data(device, count)
       # 要求データ
       # | 先頭デバイス                         | デバイス点数 | 固定値 |
@@ -272,6 +301,18 @@ module McProtocol::Frame1e
       # messages.concat _data.pack("s*").unpack("C*")
       messages.concat __data
 
+
+      messages
+    end
+
+    def message_for_set_words_request_data(device, data)
+      # | 先頭デバイス                  | デバイス点数 | 固定値 | 書込データ          |
+      # | 0x01 0x00 0x00 0x00 0x20 0x44 | 0x02         | 0x00   | 0x00 0x01 0x00 0x01 |
+      messages = []
+      messages.concat message_for_request_data_device_name(device)
+      messages.concat message_for_request_data_device_count(data.size)
+      messages.concat [0]
+      messages.concat data.pack("s*").unpack("C*")
 
       messages
     end
