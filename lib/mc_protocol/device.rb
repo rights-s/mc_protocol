@@ -1,6 +1,6 @@
 module McProtocol
   class Device
-    attr_accessor :prefix, :number, :category, :numeration, :code
+    attr_accessor :prefix, :number, :category, :numeration, :code, :code_1e
 
     def initialize(device_name)
       @settings = settings
@@ -102,7 +102,7 @@ module McProtocol
           numeration: :decimal,
           code: {
             ascii: "M*",
-            binary: 0x90
+            binary: 0x90,
           },
         },
         L: {
