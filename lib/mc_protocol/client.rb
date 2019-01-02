@@ -6,13 +6,7 @@ module McProtocol
   class Client
     attr_accessor :socket,
                   :host,
-                  :port,
-                  :network_no,
-                  :pc_no,
-                  :unit_io_no,
-                  :unit_station_no,
-                  :frame,
-                  :logger
+                  :port
 
     def initialize(host, port, options={})
       @host            = host
@@ -25,9 +19,17 @@ module McProtocol
     def self.open(host, port, options={})
       plc = self.new host, port, options
 
-      if plc.open
-        yield plc
-        plc.close
+      if block_given?
+        return if plc.open.blank?
+
+        begin
+          yield plc
+        ensure
+          plc.close
+        end
+      else
+        plc.open
+        plc
       end
     end
 
@@ -73,39 +75,6 @@ module McProtocol
     end
 
     def get_words(device_name, count)
-      device = Device.new device_name
-
-      response = []
-
-      repeat_set(device, count).each do |res|
-        messages = build_get_words_message(device, res)
-
-        @logger.info "READ: #{device.name}, #{res}"
-        write messages
-
-        data = read(res)
-
-        data.each_slice(2) do |pair|
-          response << pair.pack("c*").unpack("s<").first
-        end
-
-        # response.concat receive
-
-        device.offset_device res
-      end
-
-      @logger.debug "= #{response.join(' ')}"
-
-      response
-    rescue => e
-      @logger.error e
-    end
-
-    def set_word(device_name, value)
-      set_words(device_name, [value])
-    end
-
-    def set_words(device_name, values)
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
@@ -117,6 +86,14 @@ module McProtocol
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
+    def set_word(device_name, value)
+      set_words(device_name, [value])
+    end
+
+    def set_words(device_name, values)
+      raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
+    end
+
     private
 
     def write(messages)
@@ -124,7 +101,6 @@ module McProtocol
 
       @logger.debug "> #{dump messages}"
 
-      # TODO: Cなのかcなのか確認
       @socket.write messages.pack("c*")
       @socket.flush
     end
@@ -133,19 +109,19 @@ module McProtocol
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
-    def build_get_bits_message(device, count)
+    def get_bits_message(device, count)
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
-    def build_get_words_message(device, count)
+    def get_words_message(device, count)
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
-    def build_set_bits_message(device, data)
+    def set_bits_message(device, data)
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
-    def build_set_words_message(device, data)
+    def set_words_message(device, data)
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
@@ -153,7 +129,7 @@ module McProtocol
       raise NotImplementedError.new("You must implement #{self.name}.#{__method__}")
     end
 
-    def message_for_monitoring_timer
+    def monitoring_timer_message
       # | 監視タイマー |
       # | 0x10, 0x00   | (16 x 250ms = 4s)
 

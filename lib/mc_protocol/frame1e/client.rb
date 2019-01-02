@@ -4,6 +4,8 @@ module McProtocol::Frame1e
   BIT_DATA_LENGTH_LIMIT = 128
   WORD_DATA_LENGTH_LIMIT = 40
 
+  attr_accessor :pc_no
+
   class Client < McProtocol::Client
     def initialize(host, port, options={})
       super host, port, options
@@ -16,7 +18,7 @@ module McProtocol::Frame1e
       response = []
 
       repeat_set(device, count).each do |res|
-        messages = build_get_bits_message(device, res)
+        messages = get_bits_message(device, res)
 
         @logger.info "READ: #{device.name}, #{res}"
         write messages
@@ -55,7 +57,7 @@ module McProtocol::Frame1e
       end
 
       repeat_set(device, values.size).each do |res|
-        messages = build_set_bits_message(device, _values[0, res])
+        messages = set_bits_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
 
@@ -75,7 +77,7 @@ module McProtocol::Frame1e
       response = []
 
       repeat_set(device, count).each do |res|
-        messages = build_get_words_message(device, res)
+        messages = get_words_message(device, res)
 
         @logger.info "READ: #{device.name}, #{res}"
         write messages
@@ -105,7 +107,7 @@ module McProtocol::Frame1e
       _values = values.dup
 
       repeat_set(device, values.size).each do |res|
-        messages = build_set_words_message(device, _values[0, res])
+        messages = set_words_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values}"
 
@@ -169,112 +171,43 @@ module McProtocol::Frame1e
 
     private
 
-    def build_get_bits_message(device, count)
-      # | サブヘッダ | PC番号 | ACPU監視タイマ | 要求データ                              |
-      # | 0x00       | 0xff   | 0x10 0x00      | 0xD2 0x04 0x00 0x00 0x20 0x44 0x05 0x00 |
-      #
-      # サブヘッダ 0x00 - ビット単位の一括読出
-      #            0x01 - ワード単位の一括読出
-      #            0x02 - ビット単位の一括書込
-      #            0x03 - ワード単位の一括書込
-      # PC番号     0xff - 自局
-      #            0x03 - 他局（局番）
-      # ACPU監視タイマ(3Eと同じ)
-
+    def get_bits_message(device, count)
+      # | サブヘッダ | PC番号 | ACPU監視タイマ | 先頭デバイス番号    | デバイスコード | デバイス点数  | 固定値 |
+      # | 0x00       | 0xff   | 0x10 0x00      | 0x0a 0x00 0x00 0x00 | 0x20 0x4d      | 0x04          | 0x00   | M10から4点読込
       messages = []
-      messages.concat [0x00] # サブヘッダ
-      messages.concat [@pc_no] # PC番号
-      messages.concat message_for_monitoring_timer # ACPU監視タイマ
-      messages.concat message_for_get_bits_request_data(device, count)
+      messages.concat [0x00]                                    # サブヘッダ
+      messages.concat [@pc_no]                                  # PC番号
+      messages.concat monitoring_timer_message                  # ACPU監視タイマ
+      messages.concat request_data_device_name_message(device)  # 先頭デバイス
+      messages.concat request_data_device_count_message(count)  # デバイス点数
+      messages.concat [0]                                       # 固定値
 
       messages
     end
 
-    def build_get_words_message(device, count)
+    def get_words_message(device, count)
+      # | サブヘッダ | PC番号 | ACPU監視タイマ | 先頭デバイス番号    | デバイスコード | デバイス点数  | 固定値 |
+      # | 0x01       | 0xff   | 0x10 0x00      | 0x14 0x00 0x00 0x00 | 0x20 0x44      | 0x03          | 0x00   | D20から3点読込
       messages = []
-      messages.concat [0x01] # サブヘッダ
-      messages.concat [@pc_no] # PC番号
-      messages.concat message_for_monitoring_timer # ACPU監視タイマ
-      messages.concat message_for_get_words_request_data(device, count)
+      messages.concat [0x01]                                    # サブヘッダ
+      messages.concat [@pc_no]                                  # PC番号
+      messages.concat monitoring_timer_message                  # ACPU監視タイマ
+      messages.concat request_data_device_name_message(device)  # 先頭デバイス
+      messages.concat request_data_device_count_message(count)  # デバイス点数
+      messages.concat [0]                                       # 固定値
 
       messages
     end
 
-    def build_set_bits_message(device, data)
-      # TODO: フォーマット
-
+    def set_bits_message(device, data)
+      # | サブヘッダ | PC番号 | ACPU監視タイマ | 先頭デバイス番号    | デバイスコード | デバイス点数  | 固定値 | 書込データ |
+      # | 0x02       | 0xff   | 0x10 0x00      | 0x0a 0x00 0x00 0x00 | 0x20 0x4d      | 0x04          | 0x00   | 0x11 0x00  | M10から4点書込(1, 1, 0, 0)
       messages = []
-      messages.concat [0x02] # サブヘッダ
-      messages.concat [@pc_no] # PC番号
-      messages.concat message_for_monitoring_timer # ACPU監視タイマ
-      messages.concat message_for_set_bits_request_data(device, data)
-
-      messages
-    end
-
-    def build_set_words_message(device, data)
-      # TODO: フォーマット
-
-      messages = []
-      messages.concat [0x03] # サブヘッダ
-      messages.concat [@pc_no] # PC番号
-      messages.concat message_for_monitoring_timer # ACPU監視タイマ
-      messages.concat message_for_set_words_request_data(device, data)
-
-      messages
-    end
-
-    def message_for_get_bits_request_data(device, count)
-      # 要求データ
-      # | 先頭デバイス                         | デバイス点数 | 固定値 |
-      # | デバイス番号        | デバイスコード | デバイス点数 | 固定値 |
-      # | 50                  | M              | 12           | 0x00   |
-      # | 0xd2 0x04 0x00 0x00 | 0x20 0x4d      | 0x0c         | 0x00   |
-      messages = []
-      messages.concat message_for_request_data_device_name(device)
-      messages.concat message_for_request_data_device_count(count)
-      messages.concat [0]
-
-      messages
-    end
-
-    def message_for_get_words_request_data(device, count)
-      messages = []
-      messages.concat message_for_request_data_device_name(device)
-      messages.concat message_for_request_data_device_count(count)
-      messages.concat [0]
-
-      messages
-    end
-
-    def message_for_request_data_device_name(device)
-      # | デバイス番号        | デバイスコード |
-      # | 0xd2 0x04 0x00 0x00 | 0xa8           |
-
-      # デバイス番号 4byte
-      # 内部リレー (M)1234の場合(デバイス番号が10進数のデバイスの場合)
-      # バイナリコード時は，デバイス番号を16進数に変換します。"1234"(10進) => "4D2"(16進)
-      # デバイス番号: 4バイトの数値を下位バイト(L: ビット0~7)から送信します
-
-      message = []
-
-      p device.class
-      if device.decimal_device?
-        message.concat [device.number_int].pack("V").unpack("C*")
-
-      elsif device.hex_device?
-        message.concat [device.number.hex].pack("V").unpack("C*")
-
-      end
-      message.concat device.code.unpack("C*").reverse
-
-      message
-    end
-
-    def message_for_set_bits_request_data(device, data)
-      messages = []
-      messages.concat message_for_request_data_device_name(device)
-      messages.concat message_for_request_data_device_count(data.size)
+      messages.concat [0x02]
+      messages.concat [@pc_no]
+      messages.concat monitoring_timer_message
+      messages.concat request_data_device_name_message(device)
+      messages.concat request_data_device_count_message(data.size)
       messages.concat [0]
 
       _data = []
@@ -301,23 +234,48 @@ module McProtocol::Frame1e
       # messages.concat _data.pack("s*").unpack("C*")
       messages.concat __data
 
-
       messages
     end
 
-    def message_for_set_words_request_data(device, data)
-      # | 先頭デバイス                  | デバイス点数 | 固定値 | 書込データ          |
-      # | 0x01 0x00 0x00 0x00 0x20 0x44 | 0x02         | 0x00   | 0x00 0x01 0x00 0x01 |
+    def set_words_message(device, data)
+      # | サブヘッダ | PC番号 | ACPU監視タイマ | 先頭デバイス番号    | デバイスコード | デバイス点数  | 固定値 | 書込データ                    |
+      # | 0x03       | 0xff   | 0x10 0x00      | 0x14 0x00 0x00 0x00 | 0x20 0x44      | 0x03          | 0x00   | 0x0a 0x00 0x14 0x00 0x1e 0x00 | D20から3点書込(10, 20, 30)
       messages = []
-      messages.concat message_for_request_data_device_name(device)
-      messages.concat message_for_request_data_device_count(data.size)
+      messages.concat [0x03]
+      messages.concat [@pc_no]
+      messages.concat monitoring_timer_message
+      messages.concat request_data_device_name_message(device)
+      messages.concat request_data_device_count_message(data.size)
       messages.concat [0]
       messages.concat data.pack("s*").unpack("C*")
 
       messages
     end
 
-    def message_for_request_data_device_count(count)
+    def request_data_device_name_message(device)
+      # | デバイス番号        | デバイスコード |
+      # | 0xd2 0x04 0x00 0x00 | 0xa8           |
+
+      # デバイス番号 4byte
+      # 内部リレー (M)1234の場合(デバイス番号が10進数のデバイスの場合)
+      # バイナリコード時は，デバイス番号を16進数に変換します。"1234"(10進) => "4D2"(16進)
+      # デバイス番号: 4バイトの数値を下位バイト(L: ビット0~7)から送信します
+
+      message = []
+
+      if device.decimal_device?
+        message.concat [device.number_int].pack("V").unpack("C*")
+
+      elsif device.hex_device?
+        message.concat [device.number.hex].pack("V").unpack("C*")
+
+      end
+      message.concat device.code.unpack("C*").reverse
+
+      message
+    end
+
+    def request_data_device_count_message(count)
       # | デバイス点数 |
       # | 0x0c         | (10点)
       if count.zero?

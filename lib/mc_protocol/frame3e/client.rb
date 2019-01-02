@@ -4,6 +4,11 @@ module McProtocol::Frame3e
   BIT_DATA_LENGTH_LIMIT = 7168
   WORD_DATA_LENGTH_LIMIT = 960
 
+  attr_accessor :pc_no,
+                :network_no,
+                :unit_io_no,
+                :unit_station_no
+
   class Client < McProtocol::Client
     def initialize(host, port, options={})
       super host, port, options
@@ -20,7 +25,7 @@ module McProtocol::Frame3e
       response = []
 
       repeat_set(device, count).each do |res|
-        messages = build_get_words_message(device, res)
+        messages = get_words_message(device, res)
 
         @logger.info "READ: #{device.name}, #{res}"
         write messages
@@ -49,7 +54,7 @@ module McProtocol::Frame3e
       _values = values.dup
 
       repeat_set(device, values.size).each do |res|
-        messages = build_set_words_message(device, _values[0, res])
+        messages = set_words_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values}"
 
@@ -79,7 +84,7 @@ module McProtocol::Frame3e
       end
 
       repeat_set(device, values.size).each do |res|
-        messages = build_set_bits_message(device, _values[0, res])
+        messages = set_bits_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values[0, res]}"
 
@@ -141,11 +146,11 @@ module McProtocol::Frame3e
       return data
     end
 
-    def build_get_bits_message(device, count)
+    def get_bits_message(device, count)
       # | サブヘッダ | アクセス経路             | データ長  | 監視タイマ| 要求データ                                   |
       # | 0x50 0x00  | 0x00 0xff 0xff 0x03 0x00 | 0x10 0x00 | 0x10 0x00 | 0x04 0x00 0x00 0x64 0x00 0x00 0xa8 0x0a 0x00 |
 
-      m1 = message_for_monitoring_timer
+      m1 = monitoring_timer_message
       m2 = message_for_get_bits_request_data(device, count)
 
       messages = []
@@ -158,11 +163,11 @@ module McProtocol::Frame3e
       messages
     end
 
-    def build_get_words_message(device, count)
+    def get_words_message(device, count)
       # | サブヘッダ | アクセス経路             | データ長  | 監視タイマ| 要求データ                                   |
       # | 0x50 0x00  | 0x00 0xff 0xff 0x03 0x00 | 0x10 0x00 | 0x10 0x00 | 0x04 0x00 0x00 0x64 0x00 0x00 0xa8 0x0a 0x00 |
 
-      m1 = message_for_monitoring_timer
+      m1 = monitoring_timer_message
       m2 = message_for_get_words_request_data(device, count)
 
       messages = []
@@ -175,11 +180,11 @@ module McProtocol::Frame3e
       messages
     end
 
-    def build_set_bits_message(device, data)
+    def set_bits_message(device, data)
       # | サブヘッダ | アクセス経路             | データ長  | 監視タイマ| 要求データ                                                            |
       # | 0x50 0x00  | 0x00 0xff 0xff 0x03 0x00 | 0x10 0x00 | 0x10 0x00 | 0x01 0x14 0x00 0x00 0x60 0x00 0x00 0x90 0x02 0x00 0x0a 0x00 0x14 0x00 |
 
-      m1 = message_for_monitoring_timer
+      m1 = monitoring_timer_message
       m2 = message_for_set_bits_request_data(device, data)
 
       messages = []
@@ -192,11 +197,11 @@ module McProtocol::Frame3e
       messages
     end
 
-    def build_set_words_message(device, data)
+    def set_words_message(device, data)
       # | サブヘッダ | アクセス経路             | データ長  | 監視タイマ| 要求データ                                                            |
       # | 0x50 0x00  | 0x00 0xff 0xff 0x03 0x00 | 0x10 0x00 | 0x10 0x00 | 0x01 0x14 0x00 0x00 0x60 0x00 0x00 0x90 0x02 0x00 0x0a 0x00 0x14 0x00 |
 
-      m1 = message_for_monitoring_timer
+      m1 = monitoring_timer_message
       m2 = message_for_set_words_request_data(device, data)
 
       messages = []
