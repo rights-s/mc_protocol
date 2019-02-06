@@ -49,11 +49,15 @@ module McProtocol::Frame3e
     end
 
     def set_words(device_name, values)
+      @logger.info "SET_WORD: 1"
       device = Device.new device_name
+      @logger.info "SET_WORD: 2"
 
       _values = values.dup
+      @logger.info "SET_WORD: 3"
 
       repeat_set(device, values.size).each do |res|
+        @logger.info "SET_WORD: 4"
         messages = set_words_message(device, _values[0, res])
 
         @logger.info "WRITE: #{device.name}, #{_values}"
@@ -61,7 +65,9 @@ module McProtocol::Frame3e
         write messages
 
         # TODO: ここが怪しい
+        @logger.info "SET_WORD: 5"
         response = read
+        @logger.info "SET_WORD: 6"
 
         _values.shift res
         device.offset_device res
