@@ -136,12 +136,17 @@ module McProtocol::Frame1e
       res = []
       len = 0
       begin
+        @logger.info "TimeoutSetting: #{McProtocol.config.timeout}"
         Timeout.timeout(McProtocol.config.timeout) do
           loop do
+            @logger.info "SET_WORD: 7.1"
             c = @socket.read(1)
+            @logger.info "SET_WORD: 7.2"
             next if c.nil? || c == ""
 
             res << c.bytes.first
+            @logger.info "SET_WORD: 7.3"
+            @logger.info res
 
             next if res.length < 2
 
@@ -249,14 +254,23 @@ module McProtocol::Frame1e
     def set_words_message(device, data)
       # | サブヘッダ | PC番号 | ACPU監視タイマ | 先頭デバイス番号    | デバイスコード | デバイス点数  | 固定値 | 書込データ                    |
       # | 0x03       | 0xff   | 0x10 0x00      | 0x14 0x00 0x00 0x00 | 0x20 0x44      | 0x03          | 0x00   | 0x0a 0x00 0x14 0x00 0x1e 0x00 | D20から3点書込(10, 20, 30)
+      @logger.info "SET_WORD: 4.1"
       messages = []
+      @logger.info "SET_WORD: 4.2"
       messages.concat [0x03]
+      @logger.info "SET_WORD: 4.3"
       messages.concat [@pc_no]
+      @logger.info "SET_WORD: 4.4"
       messages.concat monitoring_timer_message
+      @logger.info "SET_WORD: 4.5"
       messages.concat request_data_device_name_message(device)
+      @logger.info "SET_WORD: 4.6"
       messages.concat request_data_device_count_message(data.size)
+      @logger.info "SET_WORD: 4.7"
       messages.concat [0]
+      @logger.info "SET_WORD: 4.8"
       messages.concat data.pack("s*").unpack("C*")
+      @logger.info "SET_WORD: 4.9"
 
       messages
     end
