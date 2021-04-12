@@ -68,6 +68,37 @@ module McProtocol::Frame3e
       end
     end
 
+    def get_bits(device_name, count)
+      device = Device.new device_name
+
+      response = []
+
+      repeat_set(device, count).each do |res|
+        messages = get_bits_message(device, res)
+
+        @logger.info "READ: #{device.name}, #{res}"
+        write messages
+
+        data = read(res)
+
+        data.each_with_index do |d, i|
+          response << (d & 16 > 0)
+
+          next if i == data.size - 1 && res.odd?
+
+          response << (d & 1 > 0)
+        end
+
+        device.offset_device res
+      end
+
+      @logger.debug "= #{response.join(' ')}"
+
+      response
+    rescue => e
+      @logger.error e
+    end
+
     def set_bits(device_name, values)
       device = Device.new device_name
 
@@ -327,6 +358,14 @@ module McProtocol::Frame3e
       # | デバイス点数 |
       # | 0x02 0x00    | (10点)
       [count].pack("v").unpack("c*")
+    end
+
+    def bit_data_length_limit
+      BIT_DATA_LENGTH_LIMIT
+    end
+
+    def word_data_length_limit
+      WORD_DATA_LENGTH_LIMIT
     end
   end
 end
