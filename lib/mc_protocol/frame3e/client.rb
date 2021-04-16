@@ -59,9 +59,7 @@ module McProtocol::Frame3e
         @logger.info "WRITE: #{device.name}, #{_values}"
 
         write messages
-
-        # TODO: ここが怪しい
-        response = read
+        response = read(res)
 
         _values.shift res
         device.offset_device res
