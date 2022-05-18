@@ -159,7 +159,7 @@ module McProtocol::Frame1e
       # 終了コード(エラーコード)
       if res[1] != 0x00
         if res[1] == 0x5b
-          raise ProtocolError.new res[2]
+          raise McProtocol::ProtocolError.new res[2]
         else
           raise "不明なエラー"
         end
