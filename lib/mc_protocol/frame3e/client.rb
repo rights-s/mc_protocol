@@ -168,7 +168,7 @@ module McProtocol::Frame3e
 
       # 終了コード(エラーコード)
       end_code = res[9..10].reverse.pack("c*").unpack("H*").first.upcase
-      raise ProtocolError.new end_code if end_code != "0000"
+      raise McProtocol::ProtocolError.new end_code if end_code != "0000"
 
       # データ
       data = res[11..-1]
